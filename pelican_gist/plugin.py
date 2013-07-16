@@ -15,8 +15,8 @@ import re
 
 
 logger = logging.getLogger(__name__)
-gist_regex = re.compile(r'(<p>\[gist:id\=([0-9a-fA-F]+)(,file\=([^\]]+))?\]</p>)')
-gist_template = """<div class="gist">
+gist_regex = re.compile(r'(<p>\[gist:id\=([0-9a-fA-F]+)(,lexer\=([^\]]+))?\]</p>)')
+gist_default_template = """<div class="gist">
     <script src='{{script_url}}'></script>
     <noscript>
         <pre><code>{{code}}</code></pre>
@@ -86,6 +86,8 @@ def setup_gist(pelican):
     pelican.settings.setdefault('GIST_CACHE_LOCATION',
         '/tmp/gist-cache')
 
+    pelican.settings.setdefault('GIST_TEMPLATE', gist_default_template)
+
     # Make sure the gist cache directory exists
     cache_base = pelican.settings.get('GIST_CACHE_LOCATION')
     if not os.path.exists(cache_base):
@@ -95,6 +97,7 @@ def setup_gist(pelican):
 def replace_gist_tags(generator):
     """Replace gist tags in the article content."""
     from jinja2 import Template
+    gist_template = generator.context.get('GIST_TEMPLATE')
     template = Template(gist_template)
 
     should_cache = generator.context.get('GIST_CACHE_ENABLED')
@@ -104,15 +107,16 @@ def replace_gist_tags(generator):
         for match in gist_regex.findall(article._content):
             gist_id = match[1]
             filename = None
+            lexer = None
             if match[3]:
-                filename = match[3]
-            logger.info('[gist]: Found gist id {} and filename {}'.format(
-                gist_id,
-                filename
-            ))
+                lexer = match[3]
+            #logger.info('[gist]: Found gist id {} and filename {}'.format(
+            #    gist_id,
+            #    filename
+            #))
 
             if should_cache:
-                body = get_cache(cache_location, gist_id, filename)
+                body = get_cache(cache_location, gist_id, None) # filenmae avant
 
             # Fetch the gist
             if not body:
@@ -125,11 +129,23 @@ def replace_gist_tags(generator):
             else:
                 logger.info('[gist]:   Found gist in cache.')
 
+            from pygments import highlight
+            from pygments.formatters import HtmlFormatter
+            from pygments.lexers import guess_lexer, get_lexer_by_name
+            if lexer is None:
+                lexer = guess_lexer(body)
+            else:
+                lexer = get_lexer_by_name(lexer)
+            body = highlight(body.encode('utf-8'), lexer, HtmlFormatter())
+            print body.encode('utf-8')
+
+
             # Create a context to render with
             context = generator.context.copy()
             context.update({
                 'script_url': unicode(script_url(gist_id, filename), 'utf-8'),
-                'code': unicode(body, 'utf-8'),
+                'gist_url': 'https://gist.github.com/{}'.format(gist_id),
+                'code': body,
             })
 
             # Render the template
